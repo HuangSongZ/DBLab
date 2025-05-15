@@ -21,10 +21,22 @@ PostgreSQL实现了一套精细的中断机制，包含三层保护体系：
 2. 中断处理（模拟`ProcessInterrupts`）- 检查并处理挂起的中断请求
 3. 前端-后端通信（模拟读取消息过程）- 模拟客户端与服务器之间的协议通信
 4. 查询执行（模拟长时间运行的查询）- 模拟可被中断的耗时操作
+5. 事务提交（模拟`SimulateTransactionCommit`）- 演示`InterruptHoldoffCount`的作用
+6. WAL日志写入（模拟`SimulateWALWrite`）- 演示`CritSectionCount`的作用
 
-程序演示了两种情况：
-- 不使用`QueryCancelHoldoffCount`保护前端读取过程 - 展示立即处理中断可能导致的问题
-- 使用`QueryCancelHoldoffCount`保护前端读取过程 - 展示如何安全地推迟中断处理
+程序演示了三种中断保护机制：
+
+1. **QueryCancelHoldoffCount**：
+   - 不使用保护时 - 前端读取过程可能被立即中断
+   - 使用保护时 - 查询取消中断被推迟到读取完成后
+
+2. **InterruptHoldoffCount**：
+   - 不使用保护时 - 事务提交过程可能被中断
+   - 使用保护时 - 所有类型的中断都被推迟到事务提交完成
+
+3. **CritSectionCount**：
+   - 不使用保护时 - WAL写入过程中的错误保持为ERROR级别
+   - 使用保护时 - WAL写入过程中的ERROR错误被升级为FATAL
 
 ## 编译和运行
 
@@ -38,10 +50,35 @@ make
 
 ## 使用方法
 
-1. 运行程序后，它会开始执行一个模拟的长时间查询
-2. 在适当的时候按下Ctrl+C发送中断信号
-3. 观察程序如何处理中断，特别是在前端读取过程中
-4. 比较有无`QueryCancelHoldoffCount`保护时的行为差异
+1. 运行程序后，会显示一个菜单，提供三种中断机制的演示选项：
+   ```
+   === 请选择要演示的程序 ===
+   1. 演示QueryCancelHoldoffCount
+   2. 演示InterruptHoldoffCount
+   3. 演示CritSectionCount
+   4. 退出
+   ```
+
+2. **演示 QueryCancelHoldoffCount**：
+   - 选择选项 1 后，程序将模拟执行查询和前端读取过程
+   - 在查询执行过程中按 Ctrl+C 可以取消查询
+   - 在前端读取过程中按 Ctrl+C，观察有无保护时的行为差异
+
+3. **演示 InterruptHoldoffCount**：
+   - 选择选项 2 后，程序将模拟事务提交过程
+   - 先演示不使用 InterruptHoldoffCount 保护的情况
+   - 再演示使用 InterruptHoldoffCount 保护的情况
+   - 在事务提交过程中按 Ctrl+C，观察中断处理的差异
+
+4. **演示 CritSectionCount**：
+   - 选择选项 3 后，程序将模拟 WAL 日志写入过程
+   - 程序会要求选择是否使用关键部分保护：
+     ```
+     选择情况: 1. 不使用关键部分, 2. 使用关键部分保护
+     ```
+   - 在 WAL 写入过程中会模拟错误情况，观察错误级别的差异
+
+5. 在每个演示过程中，可以按 Ctrl+C 发送中断信号，观察程序如何处理中断
 
 ## 关键概念
 
@@ -68,17 +105,44 @@ make
 
 ## 预期结果
 
+### 1. QueryCancelHoldoffCount 演示结果
+
 1. 不使用`QueryCancelHoldoffCount`保护时：
    - 如果在前端读取过程中按Ctrl+C，读取过程可能被立即中断
+   - 程序会显示“[中断处理] 处理查询取消请求”
    - 这在实际的PostgreSQL中可能导致协议同步问题
-   - 可能出现部分读取的消息，导致前端和后端的通信不同步
-   - 在真实系统中，这可能导致客户端与服务器之间的连接需要重新建立
 
 2. 使用`QueryCancelHoldoffCount`保护时：
    - 即使在前端读取过程中按Ctrl+C，中断也会被推迟
+   - 程序会显示“[中断处理] 正在从前端读取数据，推迟处理查询取消”
    - 直到读取完成并调用`RESUME_CANCEL_INTERRUPTS()`后才会处理中断
    - 这保证了协议的完整性和同步
-   - 中断请求不会丢失，只是被推迟到安全的时刻处理
+
+### 2. InterruptHoldoffCount 演示结果
+
+1. 不使用`InterruptHoldoffCount`保护时：
+   - 如果在事务提交过程中按Ctrl+C，事务提交可能被中断
+   - 程序会在检查中断点处理中断请求
+   - 这可能导致事务状态不一致
+
+2. 使用`InterruptHoldoffCount`保护时：
+   - 即使在事务提交过程中按Ctrl+C，所有中断也会被推迟
+   - 程序会显示“[中断处理] 无法处理中断: HoldoffCount=1...”
+   - 直到事务提交完成并调用`RESUME_INTERRUPTS()`后才会处理中断
+   - 这确保了事务提交的原子性
+
+### 3. CritSectionCount 演示结果
+
+1. 不使用`CritSectionCount`保护时：
+   - 在WAL写入过程中遇到错误时，错误级别保持为ERROR
+   - 程序会显示“[错误处理] ERROR: WAL写入过程中遇到错误”
+   - 程序会跳出当前函数，但不会终止
+
+2. 使用`CritSectionCount`保护时：
+   - 在WAL写入过程中遇到错误时，错误级别被升级为FATAL
+   - 程序会显示“[错误处理] 在关键部分中ERROR被升级为FATAL”
+   - 程序会模拟数据库实例重启（调用exit(1)）
+   - 这确保了在关键操作中不会出现部分完成的情况
 
 ## 中断机制的应用场景
 
