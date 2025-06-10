@@ -33,3 +33,6 @@ make
 2. 一个后端修改数据并提交事务
 3. 其他后端接收并处理缓存失效消息
 4. 观察缓存状态的变化
+
+## 设计原理
+obsidian://open?vault=MyDB&file=PostgreSQL%2F%E4%BD%93%E7%B3%BB%E7%BB%93%E6%9E%84%2F%E7%BC%93%E5%AD%98%E5%A4%B1%E6%95%88%E6%9C%BA%E5%88%B6%E5%AE%9E%E7%8E%B0
