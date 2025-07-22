@@ -1,0 +1,25 @@
+# 编译生成的文件
+equivalence_class_demo
+*.o
+*.so
+*.a
+
+# PostgreSQL 相关文件
+*.log
+logfile
+core.*
+
+# 临时文件
+*~
+*.tmp
+*.bak
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
